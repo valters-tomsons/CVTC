@@ -1,7 +1,8 @@
 ﻿using System.Diagnostics;
-using OpenCvSharp;
-using OBSWebsocketDotNet;
 using System.Text;
+using CVTC.Windows;
+using OBSWebsocketDotNet;
+using OpenCvSharp;
 
 var dir = Directory.GetCurrentDirectory();
 
@@ -44,7 +45,7 @@ var openVisualiser = true;
 
 var vehicleTemplates = new string[] {
     "blackbird_wide_dark",
-    "hovercraft_wide_dark"
+    // "hovercraft_wide_dark"
 };
 
 var vehicleMatsGray = new Mat[vehicleTemplates.Length];
@@ -58,9 +59,12 @@ for (var i = 0; i < vehicleMatsGray.Length; i++)
 
 if (openVisualiser)
 {
-    Cv2.NamedWindow(visualiserWindowName, WindowFlags.AutoSize | WindowFlags.GuiNormal);
+    Cv2.NamedWindow(visualiserWindowName, WindowFlags.AutoSize);
     Console.WriteLine("Starting CV visualiser");
 }
+
+var motionFactory = NaturalMouseMotionSharp.Util.FactoryTemplates.CreateFastGamerMotionFactory();
+Task? currentMotion = null;
 
 while (true)
 {
@@ -95,11 +99,25 @@ while (true)
     localTimer.Restart();
 
     // Gear similarity score and best position
-    Point gearMaxLoc;
+    Point gearPos;
     double gearSimiliartyScore;
-    Cv2.MinMaxLoc(gearResult, out _, out gearSimiliartyScore, out _, out gearMaxLoc);
+    Cv2.MinMaxLoc(gearResult, out _, out gearSimiliartyScore, out _, out gearPos);
 
-    var showVehicles = true;
+    var showVehicles = false;
+    if (gearSimiliartyScore >= gearSimilarityThreshold)
+    {
+        if (currentMotion is null || currentMotion?.IsCompleted == true)
+        {
+            var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
+            var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
+            currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x => MouseInterop.LeftClick());
+        }
+    }
+    else
+    {
+        showVehicles = true;
+    }
+
     if (showVehicles)
     {
         using var vehicleResult = new Mat();
@@ -116,13 +134,24 @@ while (true)
             double vehicleScore;
             Cv2.MinMaxLoc(vehicleResult, out _, out vehicleScore, out _, out vehiclePos);
 
-            if (vehicleScore > vehicleSimilarityThreshold)
+            if (vehicleScore >= vehicleSimilarityThreshold)
             {
-                Cv2.Rectangle(screenDecoded, new Rect(vehiclePos, vehicleGray.Size()), Scalar.Red, 2);
-                Cv2.PutText(screenDecoded, $"{vehicleName}:{vehicleScore}", vehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, Scalar.Red, lineType: LineTypes.AntiAlias);
-            }
+                if (currentMotion is null || currentMotion?.IsCompleted == true)
+                {
+                    var mouseTargetX = vehiclePos.X + vehicleGray.Size().Width / 2;
+                    var mouseTargetY = vehiclePos.Y + vehicleGray.Size().Height / 2;
+                    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x => MouseInterop.LeftClick());
+                }
 
-            statsBuilder.AppendLine($"CV2 Full({vehicleName}): {localTimer.ElapsedMilliseconds} ms");
+                if (openVisualiser)
+                {
+                    var vehicleColor = vehicleScore > vehicleSimilarityThreshold ? Scalar.LimeGreen : Scalar.OrangeRed;
+                    Cv2.Rectangle(screenDecoded, new Rect(vehiclePos, vehicleGray.Size()), vehicleColor, 2);
+                    Cv2.PutText(screenDecoded, $"{vehicleName}:{vehicleScore}", vehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, vehicleColor, lineType: LineTypes.AntiAlias);
+                    statsBuilder.AppendLine($"CV2 Full({vehicleName}): {localTimer.ElapsedMilliseconds} ms");
+                }
+
+            }
         }
     }
 
@@ -131,19 +160,25 @@ while (true)
         if (gearSimiliartyScore > 0.5d)
         {
             // Adjust point to include area around the gear
-            gearMaxLoc.X -= gearResize / 2;
-            gearMaxLoc.Y -= gearResize / 2;
+            gearPos.Y -= gearResize / 2;
+            gearPos.X -= gearResize / 2;
 
             var newSize = gearImage.Size();
             newSize.Width += gearResize;
             newSize.Height += gearResize;
 
-            var similarityColor = gearSimiliartyScore > gearSimilarityThreshold ? Scalar.LimeGreen : Scalar.OrangeRed;
-            var textLoc = gearMaxLoc.Subtract(new(0, 10));
+            var gearColor = gearSimiliartyScore > gearSimilarityThreshold ? Scalar.LimeGreen : Scalar.OrangeRed;
+            var textLoc = gearPos.Subtract(new(0, 10));
+
+            // Move label below icon, if on top of the screen
+            if (textLoc.Y < 20)
+            {
+                textLoc.Y += gearImage.Size().Height + (gearResize * 2) + 10;
+            }
 
             // Visualise best match
-            Cv2.Rectangle(screenDecoded, new Rect(gearMaxLoc, newSize), similarityColor, 2);
-            Cv2.PutText(screenDecoded, $"{gearSimiliartyScore}", textLoc, HersheyFonts.HersheySimplex, 0.4d, similarityColor, lineType: LineTypes.AntiAlias);
+            Cv2.Rectangle(screenDecoded, new Rect(gearPos, newSize), gearColor, 2);
+            Cv2.PutText(screenDecoded, $"{gearSimiliartyScore}", textLoc, HersheyFonts.HersheySimplex, 0.4d, gearColor, lineType: LineTypes.AntiAlias);
         }
 
         // Show render stats
