@@ -36,8 +36,8 @@ var gearImage = Cv2.ImRead(dir + "/templates/gear.png");
 using var gearImageGray = new Mat();
 Cv2.CvtColor(gearImage, gearImageGray, ColorConversionCodes.BGR2GRAY);
 
-var showVisualizer = true;
-var trackStats = true;
+var showVisualizer = false;
+var trackStats = false;
 
 var statsStrBuilder = trackStats ? new StringBuilder() : null!;
 
@@ -75,6 +75,8 @@ bool MoveMouseAllowed()
 
     return true;
 }
+var vehicleMenuFound = false;
+var vehicleReadyClicked = false;
 
 while (true)
 {
@@ -113,13 +115,13 @@ while (true)
     double gearSimiliartyScore;
     Cv2.MinMaxLoc(gearResult, out _, out gearSimiliartyScore, out _, out gearPos);
 
-    var trackVehicle = true;
     if (gearSimiliartyScore >= gearSimilarityThreshold)
     {
-        if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+        if (!vehicleMenuFound && MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
         {
             var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
             var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
+            vehicleMenuFound = true;
             currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
             {
                 User32Interop.LeftClick();
@@ -127,7 +129,12 @@ while (true)
         }
     }
 
-    if (trackVehicle)
+    if (currentMotion is not null)
+    {
+        await currentMotion;
+    }
+
+    if (vehicleMenuFound && !vehicleReadyClicked)
     {
         localTimer?.Restart();
 
@@ -157,28 +164,32 @@ while (true)
             Cv2.PutText(screenDecoded, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
         }
 
-        if (lightVehicleMatch)
+        if (lightVehicleMatch || darkVehicleMatch)
         {
-            if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+            var bestMatch = Math.Max(lightVehicleScore, darkVehicleScore);
+
+            if (lightVehicleScore == bestMatch)
             {
-                var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
-                var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
-                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
                 {
-                    User32Interop.LeftClick();
-                });
+                    var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
+                    var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
+
+                    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                    {
+                        User32Interop.LeftClick();
+                    });
+                    vehicleReadyClicked = true;
+                }
             }
-        }
-        else if(darkVehicleMatch)
-        {
-            if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+            else if (darkVehicleScore == bestMatch)
             {
-                var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
-                var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
-                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
                 {
-                    User32Interop.LeftClick();
-                });
+                    var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
+                    var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
+                    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null);
+                }
             }
         }
     }
@@ -212,7 +223,9 @@ while (true)
         // Show render stats
         if (trackStats)
         {
-            statsStrBuilder!.Append($"Current Cycle: {cycleTimer!.ElapsedMilliseconds} ms");
+            statsStrBuilder!.AppendLine($"Current Cycle: {cycleTimer!.ElapsedMilliseconds} ms");
+            statsStrBuilder!.AppendLine($"vehicleMenuFound: {vehicleMenuFound}");
+            statsStrBuilder!.AppendLine($"vehicleReadyClicked: {vehicleReadyClicked}");
 
             var statsPosition = new Point(100, 100);
             var text = statsStrBuilder!.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
