@@ -11,8 +11,8 @@ const string visualiserWindowName = "CVTC Visualization";
 const int width = 1920;
 const int height = 1080;
 
-const double gearSimilarityThreshold = 0.75d;
-const double vehicleSimilarityThreshold = 0.7d;
+const double gearSimilarityThreshold = 0.725d;
+const double vehicleSimilarityThreshold = 0.65d;
 const int jpegQuality = 80;
 
 const string obsWebsocket = "ws://127.0.0.1:4455";
@@ -23,7 +23,7 @@ var font = HersheyFonts.HersheyPlain;
 
 wsClient.ConnectAsync(obsWebsocket, string.Empty);
 
-while(!wsClient.IsConnected)
+while (!wsClient.IsConnected)
 {
     Console.WriteLine($"Waiting for OBS connection {obsWebsocket}]");
     await Task.Delay(1000);
@@ -44,8 +44,11 @@ var statsStrBuilder = trackStats ? new StringBuilder() : null!;
 var cycleTimer = trackStats ? new Stopwatch() : null;
 var localTimer = trackStats ? new Stopwatch() : null;
 
-var templateName = "blackbird_wide_dark";
-using var templateImg = Cv2.ImRead(dir + "/templates/" + templateName + ".png", ImreadModes.Grayscale);
+// var templateName = "blackbird_wide_dark";
+var lightTemplateName = "blackbird_wide_light";
+var darkTemplateName = "blackbird_wide_dark";
+using var lightTemplateImg = Cv2.ImRead(dir + "/templates/" + lightTemplateName + ".png", ImreadModes.Grayscale);
+using var darkTemplateImg = Cv2.ImRead(dir + "/templates/" + darkTemplateName + ".png", ImreadModes.Grayscale);
 
 if (showVisualizer)
 {
@@ -80,29 +83,29 @@ while (true)
 
     // Capture compressed jpg, resize to 1080p
     var screen64 = wsClient.GetSourceScreenshot("Capture", "jpg", width, height, jpegQuality).Replace("data:image/jpg;base64,", string.Empty);
-    if (trackStats) statsStrBuilder.AppendLine($"Capture download: {localTimer!.ElapsedMilliseconds}ms");
+    if (trackStats) statsStrBuilder!.AppendLine($"Capture download: {localTimer!.ElapsedMilliseconds}ms");
     localTimer?.Restart();
 
     // Decode base64 buffer
     var screenBuffer = Convert.FromBase64String(screen64);
-    if (trackStats) statsStrBuilder.AppendLine($"Capture decode: {localTimer!.ElapsedMilliseconds} ms");
+    if (trackStats) statsStrBuilder!.AppendLine($"Capture decode: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Decode capture to CV2 array
     using var screenDecoded = Cv2.ImDecode(screenBuffer, ImreadModes.Color);
-    if (trackStats) statsStrBuilder.AppendLine($"CV2 Decode: {localTimer!.ElapsedMilliseconds} ms");
+    if (trackStats) statsStrBuilder!.AppendLine($"CV2 Decode: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Convert capture to grayscale
     using var screenGray = new Mat();
     Cv2.CvtColor(screenDecoded, screenGray, ColorConversionCodes.BGR2GRAY);
-    if (trackStats) statsStrBuilder.AppendLine($"CV2 Grayscale: {localTimer!.ElapsedMilliseconds} ms");
+    if (trackStats) statsStrBuilder!.AppendLine($"CV2 Grayscale: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Run template (gear) matching against capture
     using var gearResult = new Mat();
     Cv2.MatchTemplate(gearImageGray, screenGray, gearResult, TemplateMatchModes.CCoeffNormed);
-    if (trackStats) statsStrBuilder.AppendLine($"CV2 MatchTemplate(gear): {localTimer!.ElapsedMilliseconds} ms");
+    if (trackStats) statsStrBuilder!.AppendLine($"CV2 MatchTemplate(gear): {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Gear similarity score and best position
@@ -110,50 +113,73 @@ while (true)
     double gearSimiliartyScore;
     Cv2.MinMaxLoc(gearResult, out _, out gearSimiliartyScore, out _, out gearPos);
 
-    var trackVehicle = false;
+    var trackVehicle = true;
     if (gearSimiliartyScore >= gearSimilarityThreshold)
     {
         if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
         {
             var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
             var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
-            currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x => User32Interop.LeftClick());
+            currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+            {
+                User32Interop.LeftClick();
+            });
         }
-    }
-    else
-    {
-        trackVehicle = true;
     }
 
     if (trackVehicle)
     {
         localTimer?.Restart();
 
-        using var vehicleResult = new Mat();
-        Cv2.MatchTemplate(templateImg, screenGray, vehicleResult, TemplateMatchModes.CCoeffNormed);
+        using var lightVehicleResult = new Mat();
+        using var darkVehicleResult = new Mat();
+        Cv2.MatchTemplate(lightTemplateImg, screenGray, lightVehicleResult, TemplateMatchModes.CCoeffNormed);
+        Cv2.MatchTemplate(darkTemplateImg, screenGray, darkVehicleResult, TemplateMatchModes.CCoeffNormed);
 
-        Point vehiclePos;
-        double vehicleScore;
-        Cv2.MinMaxLoc(vehicleResult, out _, out vehicleScore, out _, out vehiclePos);
+        Point lightVehiclePos, darkVehiclePos;
+        double lightVehicleScore, darkVehicleScore;
 
-        if (vehicleScore >= vehicleSimilarityThreshold)
+        Cv2.MinMaxLoc(lightVehicleResult, out _, out lightVehicleScore, out _, out lightVehiclePos);
+        Cv2.MinMaxLoc(darkVehicleResult, out _, out darkVehicleScore, out _, out darkVehiclePos);
+
+        var lightVehicleMatch = lightVehicleScore >= vehicleSimilarityThreshold;
+        var darkVehicleMatch = darkVehicleScore >= vehicleSimilarityThreshold;
+
+        if (trackStats) statsStrBuilder!.AppendLine($"CV2 Templates: {localTimer!.ElapsedMilliseconds} ms");
+        if (showVisualizer)
+        {
+            var lightVehicleColor = lightVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
+            Cv2.Rectangle(screenDecoded, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
+            Cv2.PutText(screenDecoded, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
+
+            var darkVehicleColor = darkVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
+            Cv2.Rectangle(screenDecoded, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
+            Cv2.PutText(screenDecoded, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
+        }
+
+        if (lightVehicleMatch)
         {
             if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
             {
-                var mouseTargetX = vehiclePos.X + templateImg.Size().Width / 2;
-                var mouseTargetY = vehiclePos.Y + templateImg.Size().Height / 2;
-                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x => User32Interop.LeftClick());
+                var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
+                var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
+                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                {
+                    User32Interop.LeftClick();
+                });
             }
-
-            if(trackStats) statsStrBuilder.AppendLine($"CV2 Full({templateName}): {localTimer!.ElapsedMilliseconds} ms");
-
-            if (showVisualizer)
+        }
+        else if(darkVehicleMatch)
+        {
+            if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
             {
-                var vehicleColor = vehicleScore > vehicleSimilarityThreshold ? Scalar.LimeGreen : Scalar.OrangeRed;
-                Cv2.Rectangle(screenDecoded, new Rect(vehiclePos, templateImg.Size()), vehicleColor, 2);
-                Cv2.PutText(screenDecoded, $"{templateName}:{vehicleScore}", vehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, vehicleColor, lineType: LineTypes.AntiAlias);
+                var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
+                var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
+                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                {
+                    User32Interop.LeftClick();
+                });
             }
-
         }
     }
 
@@ -191,7 +217,7 @@ while (true)
             var statsPosition = new Point(100, 100);
             var text = statsStrBuilder!.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            foreach(var line in text)
+            foreach (var line in text)
             {
                 Cv2.PutText(screenDecoded, line, statsPosition, font, 1.5d, Scalar.Black, thickness: 4, lineType: LineTypes.AntiAlias);
                 Cv2.PutText(screenDecoded, line, statsPosition, font, 1.5d, Scalar.White, lineType: LineTypes.AntiAlias);
