@@ -78,7 +78,7 @@ while (true)
     localTimer.Restart();
 
     // Decode capture to CV2 array
-    using var screenDecoded = Cv2.ImDecode(screenBuffer, ImreadModes.Unchanged);
+    using var screenDecoded = Cv2.ImDecode(screenBuffer, ImreadModes.Color);
     statsBuilder.AppendLine($"CV2 Decode: {localTimer.ElapsedMilliseconds} ms");
     localTimer.Restart();
 
