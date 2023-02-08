@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using CVTC.Windows;
 using CVTC.Enums;
@@ -12,8 +12,8 @@ const string visualiserWindowName = "CVTC Visualization";
 const int width = 1920;
 const int height = 1080;
 
-const double gearSimilarityThreshold = 0.725d;
-const double vehicleSimilarityThreshold = 0.65d;
+const double gearSimilarityThreshold = 0.93d;
+const double vehicleSimilarityThreshold = 0.989d;
 const int jpegQuality = 80;
 
 const string obsWebsocket = "ws://127.0.0.1:4455";
