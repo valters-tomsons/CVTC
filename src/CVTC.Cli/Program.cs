@@ -34,11 +34,11 @@ Console.WriteLine("Connected to OBS!");
 
 const int gearResize = 16;
 var gearImage = Cv2.ImRead(dir + "/templates/gear.png");
-using var gearImageGray = new Mat();
+using var gearImageGray = new UMat();
 Cv2.CvtColor(gearImage, gearImageGray, ColorConversionCodes.BGR2GRAY);
 
-var showVisualizer = false;
-var trackStats = false;
+var showVisualizer = true;
+var trackStats = true;
 
 var statsStrBuilder = trackStats ? new StringBuilder() : null!;
 
@@ -101,12 +101,12 @@ async Task ProcessGearTemplate()
     }
 }
 
-async Task ProcessVehicleIconTemplates(Mat capture, Mat grayscale)
+async Task ProcessVehicleIconTemplates(Mat capture, UMat grayscale)
 {
     localTimer?.Restart();
 
-    using var lightVehicleResult = new Mat();
-    using var darkVehicleResult = new Mat();
+    using var lightVehicleResult = new UMat();
+    using var darkVehicleResult = new UMat();
     Cv2.MatchTemplate(lightTemplateImg, grayscale, lightVehicleResult, TemplateMatchModes.CCoeffNormed);
     Cv2.MatchTemplate(darkTemplateImg, grayscale, darkVehicleResult, TemplateMatchModes.CCoeffNormed);
 
@@ -123,12 +123,12 @@ async Task ProcessVehicleIconTemplates(Mat capture, Mat grayscale)
     if (showVisualizer)
     {
         var lightVehicleColor = lightVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-        Cv2.Rectangle(capture, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
-        Cv2.PutText(capture, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
+        Cv2.Rectangle(grayscale, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
+        Cv2.PutText(grayscale, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
 
         var darkVehicleColor = darkVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-        Cv2.Rectangle(capture, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
-        Cv2.PutText(capture, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
+        Cv2.Rectangle(grayscale, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
+        Cv2.PutText(grayscale, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
     }
 
     if (lightVehicleMatch || darkVehicleMatch)
@@ -203,12 +203,13 @@ while (true)
     localTimer?.Restart();
 
     // Decode capture to CV2 array
+    Cv2.ImDecode(screenBuffer, ImreadModes.Color);
     using var screenDecoded = Cv2.ImDecode(screenBuffer, ImreadModes.Color);
     if (trackStats) statsStrBuilder!.AppendLine($"CV2 Decode: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Convert capture to grayscale
-    using var screenGray = new Mat();
+    using var screenGray = new UMat();
     Cv2.CvtColor(screenDecoded, screenGray, ColorConversionCodes.BGR2GRAY);
     if (trackStats) statsStrBuilder!.AppendLine($"CV2 Grayscale: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
