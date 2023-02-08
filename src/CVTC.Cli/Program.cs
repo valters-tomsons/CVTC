@@ -101,7 +101,7 @@ async Task ProcessGearTemplate()
     }
 }
 
-async Task ProcessVehicleIconTemplates(Mat capture, UMat grayscale)
+async Task ProcessVehicleIconTemplates(UMat grayscale)
 {
     localTimer?.Restart();
 
@@ -240,7 +240,7 @@ while (true)
 
     if (vehicleMenuIconClicked && !vehicleSelected)
     {
-        await ProcessVehicleIconTemplates(screenDecoded, screenGray);
+        await ProcessVehicleIconTemplates(screenGray);
     }
 
     if (showVisualizer)
