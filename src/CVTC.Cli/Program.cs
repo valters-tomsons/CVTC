@@ -107,8 +107,8 @@ async Task ProcessVehicleIconTemplates(Mat capture, UMat grayscale)
 
     using var lightVehicleResult = new UMat();
     using var darkVehicleResult = new UMat();
-    Cv2.MatchTemplate(lightTemplateImg, grayscale, lightVehicleResult, TemplateMatchModes.CCoeffNormed);
-    Cv2.MatchTemplate(darkTemplateImg, grayscale, darkVehicleResult, TemplateMatchModes.CCoeffNormed);
+    Cv2.MatchTemplate(lightTemplateImg, grayscale, lightVehicleResult, TemplateMatchModes.CCorrNormed);
+    Cv2.MatchTemplate(darkTemplateImg, grayscale, darkVehicleResult, TemplateMatchModes.CCorrNormed);
 
     Point lightVehiclePos, darkVehiclePos;
     double lightVehicleScore, darkVehicleScore;
@@ -215,8 +215,8 @@ while (true)
     localTimer?.Restart();
 
     // Run template (gear) matching against capture
-    using var gearResult = new Mat();
-    Cv2.MatchTemplate(gearImageGray, screenGray, gearResult, TemplateMatchModes.CCoeffNormed);
+    using var gearResult = new UMat();
+    Cv2.MatchTemplate(gearImageGray, screenGray, gearResult, TemplateMatchModes.CCorrNormed);
     if (trackStats) statsStrBuilder!.AppendLine($"CV2 MatchTemplate(gear): {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
