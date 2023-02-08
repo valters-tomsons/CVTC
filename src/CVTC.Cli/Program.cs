@@ -85,6 +85,108 @@ var gearSimiliartyScore = 0d;
 
 var state = BFState.Unknown;
 
+async Task ProcessGearTemplate()
+{
+    if (!vehicleMenuIconClicked && MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+    {
+        var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
+        var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
+        vehicleMenuIconClicked = true;
+
+        currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+        {
+            User32Interop.LeftClick();
+            state = BFState.MatchVehiclesMenu;
+        });
+    }
+}
+
+async Task ProcessVehicleIconTemplates(Mat capture, Mat grayscale)
+{
+    localTimer?.Restart();
+
+    using var lightVehicleResult = new Mat();
+    using var darkVehicleResult = new Mat();
+    Cv2.MatchTemplate(lightTemplateImg, grayscale, lightVehicleResult, TemplateMatchModes.CCoeffNormed);
+    Cv2.MatchTemplate(darkTemplateImg, grayscale, darkVehicleResult, TemplateMatchModes.CCoeffNormed);
+
+    Point lightVehiclePos, darkVehiclePos;
+    double lightVehicleScore, darkVehicleScore;
+
+    Cv2.MinMaxLoc(lightVehicleResult, out _, out lightVehicleScore, out _, out lightVehiclePos);
+    Cv2.MinMaxLoc(darkVehicleResult, out _, out darkVehicleScore, out _, out darkVehiclePos);
+
+    var lightVehicleMatch = lightVehicleScore >= vehicleSimilarityThreshold;
+    var darkVehicleMatch = darkVehicleScore >= vehicleSimilarityThreshold;
+
+    if (trackStats) statsStrBuilder!.AppendLine($"CV2 Templates: {localTimer!.ElapsedMilliseconds} ms");
+    if (showVisualizer)
+    {
+        var lightVehicleColor = lightVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
+        Cv2.Rectangle(capture, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
+        Cv2.PutText(capture, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
+
+        var darkVehicleColor = darkVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
+        Cv2.Rectangle(capture, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
+        Cv2.PutText(capture, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
+    }
+
+    if (lightVehicleMatch || darkVehicleMatch)
+    {
+        var bestMatch = Math.Max(lightVehicleScore, darkVehicleScore);
+
+        if (lightVehicleScore == bestMatch)
+        {
+            if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+            {
+                Trace.WriteLine("Vehicle found; available, invoking motion & click");
+
+                var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
+                var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
+
+                vehicleSelected = true;
+
+                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+                {
+                    User32Interop.LeftClick();
+                    state = BFState.VehicleAvailable;
+                });
+            }
+        }
+        else if (darkVehicleScore == bestMatch)
+        {
+            if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+            {
+                var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
+                var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
+                currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null);
+
+                vehicleRetries++;
+                state = BFState.VehicleUnavailable;
+
+                await Task.Delay(50);
+            }
+        }
+    }
+}
+
+async Task RefreshVehicleMenu()
+{
+    Trace.WriteLine("Vehicle unavailable, resetting cycle");
+
+    var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
+    var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
+
+    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+    {
+        User32Interop.LeftClick();
+        state = BFState.MatchOverview;
+    });
+
+    vehicleMenuIconClicked = false;
+    vehicleRetries = 0;
+}
+
 while (true)
 {
     cycleTimer?.Restart();
@@ -122,18 +224,7 @@ while (true)
 
     if (gearSimiliartyScore >= gearSimilarityThreshold)
     {
-        if (!vehicleMenuIconClicked && MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
-        {
-            var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
-            var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
-            vehicleMenuIconClicked = true;
-
-            currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
-            {
-                User32Interop.LeftClick();
-                state = BFState.MatchVehiclesMenu;
-            });
-        }
+        await ProcessGearTemplate();
     }
 
     if (currentMotion is not null)
@@ -142,89 +233,13 @@ while (true)
     }
 
     if (vehicleRetries > 5 && vehicleMenuIconClicked && !vehicleSelected)
-    {
-        Trace.WriteLine("Vehicle unavailable, resetting cycle");
-
-        var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
-        var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
-
-        currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
-        {
-            User32Interop.LeftClick();
-            state = BFState.MatchOverview;
-        });
-
-        vehicleMenuIconClicked = false;
-        vehicleRetries = 0;
+    { 
+        await RefreshVehicleMenu();
     }
 
     if (vehicleMenuIconClicked && !vehicleSelected)
     {
-        localTimer?.Restart();
-
-        using var lightVehicleResult = new Mat();
-        using var darkVehicleResult = new Mat();
-        Cv2.MatchTemplate(lightTemplateImg, screenGray, lightVehicleResult, TemplateMatchModes.CCoeffNormed);
-        Cv2.MatchTemplate(darkTemplateImg, screenGray, darkVehicleResult, TemplateMatchModes.CCoeffNormed);
-
-        Point lightVehiclePos, darkVehiclePos;
-        double lightVehicleScore, darkVehicleScore;
-
-        Cv2.MinMaxLoc(lightVehicleResult, out _, out lightVehicleScore, out _, out lightVehiclePos);
-        Cv2.MinMaxLoc(darkVehicleResult, out _, out darkVehicleScore, out _, out darkVehiclePos);
-
-        var lightVehicleMatch = lightVehicleScore >= vehicleSimilarityThreshold;
-        var darkVehicleMatch = darkVehicleScore >= vehicleSimilarityThreshold;
-
-        if (trackStats) statsStrBuilder!.AppendLine($"CV2 Templates: {localTimer!.ElapsedMilliseconds} ms");
-        if (showVisualizer)
-        {
-            var lightVehicleColor = lightVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-            Cv2.Rectangle(screenDecoded, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
-            Cv2.PutText(screenDecoded, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
-
-            var darkVehicleColor = darkVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-            Cv2.Rectangle(screenDecoded, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
-            Cv2.PutText(screenDecoded, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
-        }
-
-        if (lightVehicleMatch || darkVehicleMatch)
-        {
-            var bestMatch = Math.Max(lightVehicleScore, darkVehicleScore);
-
-            if (lightVehicleScore == bestMatch)
-            {
-                if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
-                {
-                    Trace.WriteLine("Vehicle found; available, invoking motion & click");
-
-                    var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
-                    var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
-
-                    vehicleSelected = true;
-
-                    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
-                    {
-                        User32Interop.LeftClick();
-                        state = BFState.VehicleAvailable;
-                    });
-                }
-            }
-            else if (darkVehicleScore == bestMatch)
-            {
-                if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
-                {
-                    var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
-                    var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
-                    currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null);
-
-                    vehicleRetries++;
-                    state = BFState.VehicleUnavailable;
-
-                    await Task.Delay(50);
-                }
-            }
-        }
+        await ProcessVehicleIconTemplates(screenDecoded, screenGray);
     }
 
     if (showVisualizer)
