@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using CVTC.Windows;
 using CVTC.Enums;
@@ -48,8 +48,14 @@ var localTimer = trackStats ? new Stopwatch() : null;
 // var templateName = "blackbird_wide_dark";
 var lightTemplateName = "blackbird_wide_light";
 var darkTemplateName = "blackbird_wide_dark";
+
 using var lightTemplateImg = Cv2.ImRead(dir + "/templates/" + lightTemplateName + ".png", ImreadModes.Grayscale);
+using var lightAccel = new UMat();
+Cv2.CopyTo(lightTemplateImg, lightAccel);
+
 using var darkTemplateImg = Cv2.ImRead(dir + "/templates/" + darkTemplateName + ".png", ImreadModes.Grayscale);
+using var darkAccel = new UMat();
+Cv2.CopyTo(darkTemplateImg, lightAccel);
 
 if (showVisualizer)
 {
@@ -107,8 +113,9 @@ async Task ProcessVehicleIconTemplates(UMat grayscale)
 
     using var lightVehicleResult = new UMat();
     using var darkVehicleResult = new UMat();
-    Cv2.MatchTemplate(lightTemplateImg, grayscale, lightVehicleResult, TemplateMatchModes.CCorrNormed);
-    Cv2.MatchTemplate(darkTemplateImg, grayscale, darkVehicleResult, TemplateMatchModes.CCorrNormed);
+
+    Cv2.MatchTemplate(lightAccel, grayscale, lightVehicleResult, TemplateMatchModes.CCorrNormed);
+    Cv2.MatchTemplate(darkAccel, grayscale, darkVehicleResult, TemplateMatchModes.CCorrNormed);
 
     Point lightVehiclePos, darkVehiclePos;
     double lightVehicleScore, darkVehicleScore;
@@ -123,11 +130,11 @@ async Task ProcessVehicleIconTemplates(UMat grayscale)
     if (showVisualizer)
     {
         var lightVehicleColor = lightVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-        Cv2.Rectangle(grayscale, new Rect(lightVehiclePos, lightTemplateImg.Size()), lightVehicleColor, 2);
+        Cv2.Rectangle(grayscale, new Rect(lightVehiclePos, lightAccel.Size()), lightVehicleColor, 2);
         Cv2.PutText(grayscale, $"{lightTemplateName}:{lightVehicleScore}", lightVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, lightVehicleColor, lineType: LineTypes.AntiAlias);
 
         var darkVehicleColor = darkVehicleMatch ? Scalar.LimeGreen : Scalar.OrangeRed;
-        Cv2.Rectangle(grayscale, new Rect(darkVehiclePos, darkTemplateImg.Size()), darkVehicleColor, 2);
+        Cv2.Rectangle(grayscale, new Rect(darkVehiclePos, darkAccel.Size()), darkVehicleColor, 2);
         Cv2.PutText(grayscale, $"{darkTemplateName}:{darkVehicleScore}", darkVehiclePos.Add(new(0, -15)), HersheyFonts.HersheySimplex, 0.4d, darkVehicleColor, lineType: LineTypes.AntiAlias);
     }
 
@@ -141,8 +148,8 @@ async Task ProcessVehicleIconTemplates(UMat grayscale)
             {
                 Trace.WriteLine("Vehicle found; available, invoking motion & click");
 
-                var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
-                var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
+                var mouseTargetX = lightVehiclePos.X + lightAccel.Size().Width / 2;
+                var mouseTargetY = lightVehiclePos.Y + lightAccel.Size().Height / 2;
 
                 vehicleSelected = true;
 
@@ -157,8 +164,8 @@ async Task ProcessVehicleIconTemplates(UMat grayscale)
         {
             if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
             {
-                var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
-                var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
+                var mouseTargetX = darkVehiclePos.X + darkAccel.Size().Width / 2;
+                var mouseTargetY = darkVehiclePos.Y + darkAccel.Size().Height / 2;
                 currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null);
 
                 vehicleRetries++;
@@ -204,13 +211,17 @@ while (true)
 
     // Decode capture to CV2 array
     Cv2.ImDecode(screenBuffer, ImreadModes.Color);
+
     using var screenDecoded = Cv2.ImDecode(screenBuffer, ImreadModes.Color);
+    var screenAccel = new UMat();
+    Cv2.CopyTo(screenDecoded, screenAccel);
+
     if (trackStats) statsStrBuilder!.AppendLine($"CV2 Decode: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
     // Convert capture to grayscale
     using var screenGray = new UMat();
-    Cv2.CvtColor(screenDecoded, screenGray, ColorConversionCodes.BGR2GRAY);
+    Cv2.CvtColor(screenAccel, screenGray, ColorConversionCodes.BGR2GRAY);
     if (trackStats) statsStrBuilder!.AppendLine($"CV2 Grayscale: {localTimer!.ElapsedMilliseconds} ms");
     localTimer?.Restart();
 
