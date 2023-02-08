@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text;
 using CVTC.Windows;
+using CVTC.Enums;
 using OBSWebsocketDotNet;
 using OpenCvSharp;
 
@@ -55,10 +56,8 @@ if (showVisualizer)
     Cv2.NamedWindow(visualiserWindowName, WindowFlags.AutoSize);
 }
 
-var motionFactory = NaturalMouseMotionSharp.Util.FactoryTemplates.CreateFastGamerMotionFactory();
-
+var motionFactory = NaturalMouseMotionSharp.Util.FactoryTemplates.CreateDemoRobotMotionFactory(50);
 Task? currentMotion = null;
-// var state = CVTC.
 
 bool MoveMouseAllowed()
 {
@@ -75,8 +74,16 @@ bool MoveMouseAllowed()
 
     return true;
 }
-var vehicleMenuFound = false;
-var vehicleReadyClicked = false;
+
+var vehicleMenuIconClicked = false;
+var vehicleSelected = false;
+
+var vehicleRetries = 0;
+
+var gearPos = new Point();
+var gearSimiliartyScore = 0d;
+
+var state = BFState.Unknown;
 
 while (true)
 {
@@ -111,20 +118,20 @@ while (true)
     localTimer?.Restart();
 
     // Gear similarity score and best position
-    Point gearPos;
-    double gearSimiliartyScore;
     Cv2.MinMaxLoc(gearResult, out _, out gearSimiliartyScore, out _, out gearPos);
 
     if (gearSimiliartyScore >= gearSimilarityThreshold)
     {
-        if (!vehicleMenuFound && MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
+        if (!vehicleMenuIconClicked && MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
         {
             var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
             var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
-            vehicleMenuFound = true;
+            vehicleMenuIconClicked = true;
+
             currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
             {
                 User32Interop.LeftClick();
+                state = BFState.MatchVehiclesMenu;
             });
         }
     }
@@ -134,7 +141,24 @@ while (true)
         await currentMotion;
     }
 
-    if (vehicleMenuFound && !vehicleReadyClicked)
+    if (vehicleRetries > 5 && vehicleMenuIconClicked && !vehicleSelected)
+    {
+        Trace.WriteLine("Vehicle unavailable, resetting cycle");
+
+        var mouseTargetX = gearPos.X + gearImage.Size().Width / 2;
+        var mouseTargetY = gearPos.Y + gearImage.Size().Height / 2;
+
+        currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
+        {
+            User32Interop.LeftClick();
+            state = BFState.MatchOverview;
+        });
+
+        vehicleMenuIconClicked = false;
+        vehicleRetries = 0;
+    }
+
+    if (vehicleMenuIconClicked && !vehicleSelected)
     {
         localTimer?.Restart();
 
@@ -172,14 +196,18 @@ while (true)
             {
                 if (MoveMouseAllowed() && (currentMotion is null || currentMotion?.IsCompleted == true))
                 {
+                    Trace.WriteLine("Vehicle found; available, invoking motion & click");
+
                     var mouseTargetX = lightVehiclePos.X + lightTemplateImg.Size().Width / 2;
                     var mouseTargetY = lightVehiclePos.Y + lightTemplateImg.Size().Height / 2;
+
+                    vehicleSelected = true;
 
                     currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null).ContinueWith(x =>
                     {
                         User32Interop.LeftClick();
+                        state = BFState.VehicleAvailable;
                     });
-                    vehicleReadyClicked = true;
                 }
             }
             else if (darkVehicleScore == bestMatch)
@@ -189,6 +217,11 @@ while (true)
                     var mouseTargetX = darkVehiclePos.X + darkTemplateImg.Size().Width / 2;
                     var mouseTargetY = darkVehiclePos.Y + darkTemplateImg.Size().Height / 2;
                     currentMotion = motionFactory.MoveAsync(mouseTargetX, mouseTargetY, null);
+
+                    vehicleRetries++;
+                    state = BFState.VehicleUnavailable;
+
+                    await Task.Delay(50);
                 }
             }
         }
@@ -224,8 +257,8 @@ while (true)
         if (trackStats)
         {
             statsStrBuilder!.AppendLine($"Current Cycle: {cycleTimer!.ElapsedMilliseconds} ms");
-            statsStrBuilder!.AppendLine($"vehicleMenuFound: {vehicleMenuFound}");
-            statsStrBuilder!.AppendLine($"vehicleReadyClicked: {vehicleReadyClicked}");
+            statsStrBuilder!.AppendLine($"vehicleMenuFound: {vehicleMenuIconClicked}");
+            statsStrBuilder!.AppendLine($"vehicleReadyClicked: {vehicleSelected}");
 
             var statsPosition = new Point(100, 100);
             var text = statsStrBuilder!.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

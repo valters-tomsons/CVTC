@@ -5,7 +5,7 @@ public enum BFState
     Unknown,
     MatchOverview,
     MatchVehiclesMenu,
-    PlayerAlive,
+    VehicleAvailable,
     VehicleUnavailable,
     PlayerKilled
 }
